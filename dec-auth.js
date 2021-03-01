@@ -217,7 +217,8 @@ export const changeAccountMetaData = async function(userKey, newMetaData) {
     let account = await retrieveAccount(userKey, null, true);
     if (account == null)
         return false;
-    await removeAccount(userKey, null, force);
+    // Force account removal, as preserving sensitive data.
+    await removeAccount(userKey, null, true);
     return await createAccount(userKey, account.encryptedPassKey, newMetaData,
                          account.sensitiveData, true);
 }
