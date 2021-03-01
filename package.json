@@ -1,0 +1,29 @@
+{
+  "name": "dec-auth",
+  "version": "0.0.1",
+  "description": "A decentralised authentication service on the Jupiter blockchain",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node test-dir/test-app.js"
+  },
+  "keywords": [
+    "auth",
+    "blockchain",
+    "secure"
+  ],
+  "author": "Greg Cawthorne",
+  "license": "ASF",
+  "dependencies": {
+    "axois": "^0.0.1-security",
+    "bignumber": "^1.1.0",
+    "crypto": "^1.0.1",
+    "fs": "^0.0.1-security",
+    "util": "^0.12.3",
+    "uuid": "^8.3.2",
+    "zlib": "^1.0.5"
+  },
+  "devDependencies": {
+    "typescript": "^4.2.2"
+  }
+}
