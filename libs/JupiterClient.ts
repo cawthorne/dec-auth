@@ -1,9 +1,10 @@
 import axios, { AxiosResponse } from 'axios'
 import BigNumber from 'bignumber.js'
-import Encryption from '../libs/Encryption'
+import Encryption from '../libs/Encryption.js'
 
 export default function JupiterClient(opts: IJupiterClientOpts) {
-  if (!(Boolean(opts.server) && Boolean(opts.address) && Boolean(opts.passphrase)))
+  if (!(Boolean(opts.server) && Boolean(opts.address) &&
+      Boolean(opts.passphrase)))
     throw new Error("You must properly initialise the Jupiter Client");
   const encryption = Encryption({ secret: opts.encryptSecret })
   const CONF = {
@@ -64,6 +65,18 @@ export default function JupiterClient(opts: IJupiterClientOpts) {
       return { address, publicKey, requestProcessingTime, account }
     },
 
+    async getAccountPublicKey() {
+      const {
+        data: { publicKey: pubKey, requestProcessingTime },
+      } = await this.request('get', '/nxt', {
+        params: {
+          requestType: 'getAccountPublicKey',
+          account: opts.address,
+        },
+      })
+      return pubKey 
+    },
+
     async sendMoney(recipientAddr: string) {
       const { data } = await this.request('post', '/nxt', {
         params: {
@@ -88,16 +101,19 @@ export default function JupiterClient(opts: IJupiterClientOpts) {
       return JSON.parse(await this.decrypt(cipherText))
     },
 
-    async storeRecord(record: any, passKey: string, sensitiveData: any,
-                      preCrypted: boolean) {
+    async storeUserAccount(accountId: string, userKey: string, metaData: any,
+                           sensitiveData: any, passKey: string,
+                           preCrypted: boolean) {
       const { data } = await this.request('post', '/nxt', {
         params: {
           requestType: 'sendMessage',
           secretPhrase: opts.passphrase,
           recipient: opts.address,
           recipientPublicKey: opts.publicKey,
-          messageToEncrypt: {
-            ...record,
+          messageToEncrypt: JSON.stringify({
+            accountId: accountId,
+            userKey: userKey,
+            metaData: JSON.stringify(metaData),
             encryptedPassKey: !passKey ?
               null :
                 !preCrypted ?
@@ -110,7 +126,29 @@ export default function JupiterClient(opts: IJupiterClientOpts) {
                 JSON.stringify(sensitiveData))) :
                 sensitiveData),
             [this.recordKey]: true
-          },
+          }),
+          feeNQT: CONF.feeNQT,
+          deadline: CONF.deadline,
+          compressMessageToEncrypt: true,
+        },
+      })
+      if (data.errorCode && data.errorCode !== 0) throw new Error(data)
+      return data
+    },
+
+    async storeRecord(record: any) {
+      const { data } = await this.request('post', '/nxt', {
+        params: {
+          requestType: 'sendMessage',
+          secretPhrase: opts.passphrase,
+          recipient: opts.address,
+          recipientPublicKey: opts.publicKey,
+          messageToEncrypt: await this.encrypt(
+            JSON.stringify({
+              ...record,
+              [this.recordKey]: true,
+            })
+          ),
           feeNQT: CONF.feeNQT,
           deadline: CONF.deadline,
           compressMessageToEncrypt: true,
