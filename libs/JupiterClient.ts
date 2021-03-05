@@ -6,9 +6,10 @@ export default function JupiterClient(opts: IJupiterClientOpts) {
   if (!(Boolean(opts.server) && Boolean(opts.address) &&
       Boolean(opts.passphrase)))
     throw new Error("You must properly initialise the Jupiter Client");
+  let chainCache: any = {};
   const encryption = Encryption({ secret: opts.encryptSecret })
   const CONF = {
-    feeNQT: 100,
+    feeNQT: 150,
     deadline: 60,
     minimumTableBalance: 50000,
     minimumAppBalance: 100000,
@@ -101,39 +102,78 @@ export default function JupiterClient(opts: IJupiterClientOpts) {
       return JSON.parse(await this.decrypt(cipherText))
     },
 
-    async storeUserAccount(accountId: string, userKey: string, metaData: any,
+    async storeCreateUserAccount(accountId: string, userKey: string, metaData: any,
                            sensitiveData: any, passKey: string,
                            preCrypted: boolean) {
+      const messageToEncrypt = {
+        accountId: accountId,
+        userKey: userKey,
+        metaData: JSON.stringify(metaData),
+        encryptedPassKey: !passKey ?
+          null :
+            passKey,
+        sensitiveData: !sensitiveData ?
+          null :
+          (!preCrypted ?
+            (await this.encrypt(
+            JSON.stringify(sensitiveData))) :
+            sensitiveData),
+        [this.recordKey]: true
+      };
+
       const { data } = await this.request('post', '/nxt', {
         params: {
           requestType: 'sendMessage',
           secretPhrase: opts.passphrase,
           recipient: opts.address,
           recipientPublicKey: opts.publicKey,
-          messageToEncrypt: JSON.stringify({
-            accountId: accountId,
-            userKey: userKey,
-            metaData: JSON.stringify(metaData),
-            encryptedPassKey: !passKey ?
-              null :
-                !preCrypted ?
-                  await this.encrypt(passKey) :
-                  passKey,
-            sensitiveData: !sensitiveData ?
-              null :
-              (!preCrypted ?
-                (await this.encrypt(
-                JSON.stringify(sensitiveData))) :
-                sensitiveData),
-            [this.recordKey]: true
-          }),
+          messageToEncrypt: JSON.stringify(messageToEncrypt),
+          feeNQT: CONF.feeNQT,
+          deadline: CONF.deadline,
+          compressMessageToEncrypt: true,
+        },
+      })
+      if (data.errorCode && data.errorCode !== 0){
+        console.log(data);
+        throw new Error(data);
+    }
+
+      // This won't be stored more than 2 minutes locally.
+      chainCache = messageToEncrypt;
+
+      return data
+    },
+
+    async storeRemoveUserAccount(record: any) {
+      const { data } = await this.request('post', '/nxt', {
+        params: {
+          requestType: 'sendMessage',
+          secretPhrase: opts.passphrase,
+          recipient: opts.address,
+          recipientPublicKey: opts.publicKey,
+          messageToEncrypt:
+            JSON.stringify({
+              ...record,
+              [this.recordKey]: true,
+            }),
           feeNQT: CONF.feeNQT,
           deadline: CONF.deadline,
           compressMessageToEncrypt: true,
         },
       })
       if (data.errorCode && data.errorCode !== 0) throw new Error(data)
+      
+      chainCache = null;
+
       return data
+    },
+
+    queryUserAccountFromChainCache() {
+      return chainCache != null;
+    },
+
+    getUserAccountFromChainCache() {
+      return chainCache;
     },
 
     async storeRecord(record: any) {

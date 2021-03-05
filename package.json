@@ -1,12 +1,12 @@
 {
   "name": "dec-auth",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A decentralised authentication service on the Jupiter blockchain",
   "main": "dec-auth.js",
   "type": "module",
   "scripts": {
     "test": "node dst/test-dir/test-app.js",
-    "build": "tsc && npm i",
+    "build": "rm -rf dst && tsc && npm i",
     "postinstall": "npm run typings",
     "typings": "typings install"
   },
@@ -19,9 +19,11 @@
   "license": "ASF",
   "dependencies": {
     "axios": "^0.21.1",
+    "bcrypt": "^5.0.1",
     "bignumber.js": "^9.0.1",
     "crypto": "^1.0.1",
     "fs": "^0.0.1-security",
+    "typings": "^2.1.1",
     "util": "^0.12.3",
     "uuid": "^8.3.2",
     "zlib": "^1.0.5"

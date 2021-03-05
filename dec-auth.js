@@ -1,6 +1,6 @@
 import JupiterClient from './libs/JupiterClient.js';
 import { v1 as uuidv1 } from 'uuid'
-
+import  bcrypt from 'bcrypt'
 
 // Global variables
 // --------------------------------------------------------------------------------------
@@ -16,10 +16,10 @@ let jupPassphrase = null;
 // Holds the master Jupiter account's public keyp.
 let jupPublicKey = null;
 
-// Global jupClient TODO: reuse this global client more efficiently.
-let jupClient = null;
+// Global jupClients. Holds a Jup Client for each 
+let jupClients = {};
 
-
+const bcryptSaltRounds = 12;
 
 // API functions
 // --------------------------------------------------------------------------------------
@@ -29,33 +29,53 @@ let jupClient = null;
 /// jupClient, specifically initialised with the passkey for a specific users data.
 /// N.B. All data is also encrypted with the master accounts encryption
 /// keys in addition.
-/// @param {string} passKey is the password for a user account.
+/// @param {string} userKey is the username field for the account,
+/// for example an email address.
+/// @param {string} passKey is the password for the user account.
 /// @returns void
-const getJupiterClient = async function(passKey){
+const getJupiterClient = async function(userKey, passKey){
+    if (jupAccountId == null)
+        throw new Error("Cannot get Jupiter Client without account Id.");
 
-    jupClient = JupiterClient({
-        server: serverUrl,
-        address: jupAccountId,
-        passphrase: jupPassphrase,
-        publicKey: jupPublicKey,
-        encryptSecret: passKey,    
-    });
-
-    // Fetch public key if not provided. Should only need to be fetched
-    // once per lifetime.
-    if (!Boolean(jupPublicKey)){
-        jupPublicKey = await jupClient.getAccountPublicKey();
-
-        jupClient = JupiterClient({
+    // Sometimes we just want blockcahin read access without user account
+    // encryption/decryption.
+    if (passKey == null)
+        return JupiterClient({
             server: serverUrl,
             address: jupAccountId,
             passphrase: jupPassphrase,
             publicKey: jupPublicKey,
-            encryptSecret: passKey,    
+            encryptSecret: null
+        });
+
+    if (userKey in jupClients)
+        return jupClients[userKey];
+
+    let passHash = bcrypt.hashSync(userKey.concat(passKey), bcryptSaltRounds);
+
+    jupClients[userKey] = JupiterClient({
+        server: serverUrl,
+        address: jupAccountId,
+        passphrase: jupPassphrase,
+        publicKey: jupPublicKey,
+        encryptSecret: passHash
+    });
+
+    // Fetch public key if not provided. Should only need to be fetched
+    // once per application lifetime.
+    if (!Boolean(jupPublicKey)){
+        jupPublicKey = await jupClients[userKey].getAccountPublicKey();
+
+        jupClients[userKey] = JupiterClient({
+            server: serverUrl,
+            address: jupAccountId,
+            passphrase: jupPassphrase,
+            publicKey: jupPublicKey,
+            encryptSecret: passHash
         });
     }
 
-    return jupClient;
+    return jupClients[userKey];
 }
 
 /// @function setJupiterAccountDetails
@@ -91,8 +111,9 @@ export const checkUsernameAvailability = async function(userKey) {
 /// @param {string} userKey is the username field for the account,
 /// for example an email address.
 /// @param {string} passKey is the password for the user account.
-/// @param {Object} metaData is any data relating to this account, but can
-/// be accessed readily by this app, without the users password.
+/// @param {Object} metaData is any data relating to this account, which can
+/// be accessed by this app, without the users password. But is encrypted once
+/// on the Jupiter Blockchain. Should be considered less secure than sensitiveData.
 /// @param {Object} sensitiveData is any data relating to this account, which will
 /// only be accessible with the users password in future.
 /// N.B. if the user forgets their password their sensisitveData will be lost.
@@ -105,16 +126,43 @@ export const createAccount = async function(userKey, passKey, metaData, sensitiv
     if (!isValidEntry(userKey) || !isValidEntry(passKey))
         return null;
 
-    if (await checkUsernameAvailability(userKey) === false)
+    if ((await checkUsernameAvailability(userKey)) === false)
         return false;
 
-    let jupClient = await getJupiterClient(userKey.concat(passKey));
+    let jupClient = await getJupiterClient(userKey, passKey);
 
-    let res = await jupClient.storeUserAccount(uuidv1(), userKey,
-                                               metaData, sensitiveData,
-                                               passKey, preCrypted);
+    const passHash = bcrypt.hashSync(userKey.concat(passKey), bcryptSaltRounds);
+
+    const res = await jupClient.storeCreateUserAccount(uuidv1(), userKey,
+                                                    metaData, sensitiveData,
+                                                    passHash, preCrypted);
 
     return res['broadcasted'] == true;
+}
+
+/// @function verifyIdentity
+/// Verifies if a users account and password combination are a valid pair.
+/// @param {string} userKey is the username field for the account,
+/// for example an email address.
+/// @param {string} passKey is the current password for the account.
+/// @returns true on if the login data is valid, otherwise false.
+export const verifyIdentity = async function(userKey, passKey) {
+    // Retrieve account without any decryption.
+    let account = await retrieveAccount(userKey, null);
+
+    // Can be not null if password is wrong!
+    if (account == null)
+        return false;
+
+    const accountDecrypted = await retrieveAccount(userKey, passKey);
+
+    if (accountDecrypted == null)
+        return false;
+
+    return (
+        bcrypt.compareSync(
+            userKey.concat(passKey),
+            accountDecrypted.encryptedPassKey));
 }
 
 /// @function retrieveAccount
@@ -127,8 +175,14 @@ export const createAccount = async function(userKey, passKey, metaData, sensitiv
 /// with the sensitive data field nullified.
 /// If the password and/or username were invalid, null will be returned.
 export const retrieveAccount = async function(userKey, passKey) {
-    let acc = await getAccount(userKey, passKey);
-    return acc;
+    return await getAccount(userKey, passKey);
+}
+
+/// @function retrieveAllAccounts
+/// Retrieves all user accounts from the Jupiter blockchain.
+/// @returns All user accounts. No sensitve data is decrypted.
+export const retrieveAllAccounts = async function() {
+    return await getAllAccounts();
 }
 
 /// @function retrieveAccountData
@@ -148,6 +202,36 @@ export const retrieveAccountData = async function(userKey, passKey) {
     return null;
 }
 
+/// @function retrieveAccountMetaData
+/// Retrieves a user accounts meta data from the Jupiter blockchain.
+/// Only the username is needed, no password is needed.
+/// @param {string} userKey is the username field for the account,
+/// for example an email address.
+/// @returns the requested account's meta data as an object on success.
+/// otherwise null;
+export const retrieveAccountMetaData = async function(userKey) {
+    let account = await retrieveAccount(userKey, passKey);
+    if (account != null)
+        return account.metaData;
+    return null;
+}
+
+/// @function retrieveAccountSensitiveData
+/// Retrieves a user account from the Jupiter blockchain.
+/// @param {string} userKey is the username field for the account,
+/// for example an email address.
+/// @param {string} passKey is the password for the user account.
+/// @returns the requested account's sensitive data, decrypted as object on success.
+/// If the password was null, but the username was valid, then function will succeed, but
+/// the sensitiveData field will be nullified. 
+/// If the password and/or username were invalid, null will be returned.
+export const retrieveAccountSensitiveData = async function(userKey, passKey) {
+    let account = await retrieveAccount(userKey, passKey);
+    if (account != null)
+        return account.sensitiveData;
+    return null;
+}
+
 /// @function changeAccountPassword
 /// Changes a user account's password on the Jupiter blockchain.
 /// @param {string} userKey is the username field for the account,
@@ -156,14 +240,17 @@ export const retrieveAccountData = async function(userKey, passKey) {
 /// @param {string} newPassKey is the new password for the account.
 /// @returns true on success, otherwise false.
 export const changeAccountPassword = async function(userKey, passKey, newPassKey) {
-    if (verifyIdentity(userKey, passKey) === false)
+    if (await verifyIdentity(userKey, passKey) === false)
         return false;
+
     // Since verification was passed, sensitiveData will be decrypted
     // and available, if present.
     const accData = await retrieveAccountData(userKey, passKey);
+
     if (accData == null)
         return false;
     await removeAccount(userKey, passKey);
+
     await createAccount(userKey, newPassKey, accData.metaData, accData.sensitiveData);
     return true;
 }
@@ -258,27 +345,11 @@ export const removeAccount = async function(userKey, passKey, force = false) {
     // Since we just want the account id, no need for user password.
     let account = await retrieveAccount(userKey, null);
     let accountId = account.id;
-    let jupClient = await getJupiterClient(userKey.concat(passKey));
-    await jupClient.storeRecord({ accountId: accountId, isDeleted: true });
+    let jupClient = await getJupiterClient(userKey, passKey);
+    await jupClient.storeRemoveUserAccount({ accountId: accountId, isDeleted: true });
     return true;
 }
 
-/// @function verifyIdentity
-/// Verifies if a users account and password combination are a valid pair.
-/// @param {string} userKey is the username field for the account,
-/// for example an email address.
-/// @param {string} passKey is the current password for the account.
-/// @returns true on if the login data is valid, otherwise false.
-export const verifyIdentity = async function(userKey, passKey) {
-    // Retrieve account without any decryption.
-    let account = await retrieveAccount(userKey, null);
-    if (account == null)
-        return false;
-
-    let jupClient = await getJupiterClient(userKey.concat(passKey));
-    let encryptedPassKeyTest = jupClient.encrypt(passKey);
-    return await retrieveAccount(userKey, passKey).encryptedPassKey === encryptedPassKeyTest;
-}
 
 // Helper Methods
 // --------------------------------------------------------------------------------------
@@ -325,13 +396,51 @@ const getAllAccounts = async function() {
         [account.accountId]: { ...result[account.accountId], ...account },
     }),
     {}
-    )
+    );
 
-    return Object.values(allRecords).filter((r) => !r.isDeleted)
+    let accounts = Object.values(allRecords).filter((r) => !r.isDeleted);
+
+    // Applying chain cached values
+    accounts = accounts.filter((a) =>
+        (a.userKey in Object.keys(jupClients)) ?
+            (jupClients[a.userKey].queryUserAccountFromChainCache() ?
+            JSON.parse(JSON.stringify(jupClients[a.userKey].getUserAccountFromChainCache())) :
+                a) :
+         a);
+
+    for (const userKey of Object.keys(jupClients)){
+        let contains = false;
+        for (const accs of accounts){
+            if (accs.userKey == userKey)
+                contains = true;
+        }
+        if (!contains){
+            let cachedAcc = jupClients[userKey].queryUserAccountFromChainCache() ?
+            JSON.parse(JSON.stringify(jupClients[userKey].getUserAccountFromChainCache())) :
+                null;
+            if (cachedAcc != null)
+                accounts.push(cachedAcc);
+        }
+    }
+    
+    return accounts;
+}
+
+/// @function deleteAllAccounts
+/// Deletes all user accounts on the Jupiter Blockchain created under the
+/// master Jupiter Account.
+/// @returns void
+export const deleteAllAccounts = async function() {
+    const accounts = await getAllAccounts();
+    for (const account of accounts){
+        let jupClient = await getJupiterClient(account.userKey, null);
+        await jupClient.storeRemoveUserAccount({ accountId: account.accountId,
+                                                 isDeleted: true });
+    }
 }
 
 /// @function getAccount
-/// Fetches the requested account from the Jupiter Blockchain.
+/// Fetches the requested user account from the Jupiter Blockchain.
 /// @param {string} userKey is the username field for the account,
 /// for example an email address.
 /// @param {string} passKey is the current password for the account.
@@ -343,21 +452,22 @@ const getAllAccounts = async function() {
 /// If the password and/or username were invalid, null will be returned.
 const getAccount = async function(userKey, passKey, keepEncryptedSensitiveData = false) {
     const accounts = await getAllAccounts();
+
     let account = accounts.find((a) => a.userKey === userKey);
     if (account == null)
         return null;
 
-    let jupClient = await getJupiterClient(userKey.concat(passKey));
+    let jupClient = await getJupiterClient(userKey, passKey);
     if (passKey != null){
-        if (account.encryptedPassKey === await jupClient.encrypt(passKey)){
+        if (bcrypt.compareSync(userKey.concat(passKey), account.encryptedPassKey)){
             account.sensitiveData = account.sensitiveData ? 
-                JSON.parse(await client.decrypt(account.sensitiveData)) :
+                JSON.parse(await jupClient.decrypt(account.sensitiveData)) :
                 null;
         } else {
             // Failed password attempt required null return.
             return null;
         }
-    } else if (!keepEncryptedSensitiveData){
+    } else if (!keepEncryptedSensitiveData){console.log("473");
         // If keepEncryptedSensitiveData is true, we don't nullify this field.
         account["sensitiveData"] = null;
     }
