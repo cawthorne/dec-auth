@@ -38,7 +38,7 @@ export default class ChainCache {
     }
 
     fetchRecordFromChainCache = async function(accountId){
-        return deepCopy(chainCache[accountId].record);
+        return deepCopy(chainCache[accountId]);
     }
 
     fetchUserKeyRecordFromChainCache = async function(userKey){
