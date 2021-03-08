@@ -1,6 +1,7 @@
-import { setJupiterAccountDetails, createAccount, verifyIdentity, deleteAllAccounts, retrieveAccount, retrieveAccountData,
-    retrieveAccountData, retrieveAccountSensitiveData, changeAccountPassword, changeAccountUsername } from '../dec-auth.js';
-import { strict as assert } from 'assert';
+import { setJupiterAccountDetails, createAccount, verifyIdentity, deleteAllAccounts, retrieveAccount,
+    retrieveAccountData, retrieveAccountMetaData, retrieveAccountSensitiveData, changeAccountData,
+    changeAccountMetaData, changeAccountSensitiveData, changeAccountPassword, changeAccountUsername,
+    setTestAccount, setFirstLastBlockIndex } from '../dec-auth.js';
 
 // Holds the applications funded & public key enabled
 // master Jupiter account identifier.
@@ -10,136 +11,279 @@ let jupPassphrase = "";
 // Holds the master Jupiter account's public keyp.
 let jupPublicKey = "";
 
+const assert = function(bool) {
+    if (bool)
+        return;
+    else
+        throw new Error("Assert failed!!!");
+}
 
-setJupiterAccountDetails(null, jupAccountId, jupPassphrase);
+function sleep(milliseconds) {
+    const date = Date.now();
+    let currentDate = null;
+    do {
+        currentDate = Date.now();
+    } while (currentDate - date < (milliseconds*1000));
+}
 
-// WARNING, DO NOT RUN THIS ON A PRODUCTION ACCOUNT. WILL DELETE ALL COUNTS.
-await deleteAllAccounts();
+function print(text, extra){
+    if (extra != null)
+        console.log("TEST: " + text, extra);
+    else
+        console.log("TEST: " + text);
+}
 
-const username = "newAccount-" + new Date().getTime();
-const newUsername = "NEW-" + username;
-const password = "pass1";
-const newPassword = "passX1";
-const badPass = "wfbkqufbhqelfbqefbhqebhqf";
+ 
+async function runTests(sleepSeconds) { 
+    print("DEC-AUTH Tests starting: " +
+        (sleepSeconds == 0 ?
+            " Pauses disabled" :
+           ("sleep time between calls: " + sleepSeconds + "(s)")));
 
-const newMetaData = {goodAccChanged: true};
-const newSensitiveData = {secretVal: 13};
+    print("Please make sure you have added a funded, JUP account wiht public key assigned.")
+    setJupiterAccountDetails(null, jupAccountId, jupPassphrase);
 
-const newMetaData2 = {goodAccChanged2: true};
-const newSensitiveData2 = {secretVal: 17};
+    setFirstLastBlockIndex(0, 100);
 
-console.log("username: ", username);
-console.log("password: ", password);
+    // WARNING, DO NOT RUN deleteAllAccounts ON A PRODUCTION ACCOUNT.
+    // WILL DELETE ALL ACCCOUNTS.
+    //await deleteAllAccounts();
+    sleep(1);
 
-let accountCreated = await createAccount(username, password, {goodAcc: true}, {hidden: true, secretVal: 7});
+    const username = "newAccount-" + new Date().getTime();
+    setTestAccount(username);
 
-console.log("account was succesfully created? ", accountCreated);
+    const newUsername = "NEW-" + username;
+    const password = "pass1";
+    const newPassword = "passX1";
+    const badPass = "wfbkqufbhqelfbqefbhqebhqf";
 
-assert(accountCreated);
+    const newMetaData = {goodAccChanged: true};
+    const newSensitiveData = {secretVal: 13};
 
-let accountCreatedTwice = await createAccount(username, password, {goodAcc: true}, {hidden: true, secretVal: 7});
+    const newMetaData2 = {goodAccChanged2: true};
+    const newSensitiveData2 = {secretVal: 17};
 
-console.log("account with same username failed (should fail): ", accountCreatedTwice);
+    print("username: ", username);
+    print("password: ", password);
 
-assert(!accountCreatedTwice);
+    let accountCreated = await createAccount(username, password, {goodAcc: true}, {hidden: true, secretVal: 7});
 
-let verificationPassed = await verifyIdentity(username, password);
+    print("account was succesfully created? (true => correct): ", accountCreated);
 
-console.log("account verification passed? ", verificationPassed);
+    assert(accountCreated);
 
-assert(verificationPassed);
+    sleep(sleepSeconds);
 
-let badVerification = await verifyIdentity(username, badPass);
+    let accountCreatedTwice = await createAccount(username, password, {goodAcc: true}, {hidden: true, secretVal: 7});
 
-console.log("bad password verification failed? ", !badVerification);
+    print("account with same username fails (true => correct): ", !accountCreatedTwice);
 
-assert(!badVerification);
+    assert(!accountCreatedTwice);
 
-let account = await retrieveAccount(username, password)
+    sleep(sleepSeconds);
 
-assert(account.userKey == username);
+    let verificationPassed = await verifyIdentity(username, password);
 
-console.log("get account: ", account);
+    print("account verification passed? (true => correct): ", verificationPassed);
 
-const accountData = await retrieveAccountData(username, password);
+    assert(verificationPassed);
 
-assert(accountData.sensitiveData != null && accountData.sensitiveData['hidden']);
+    sleep(sleepSeconds);
 
-console.log("get account data: ", accountData);
+    let badVerification = await verifyIdentity(username, badPass);
 
-console.log("change account password: ", await changeAccountPassword(username, password, newPassword));
+    print("bad password verification failed? (true => correct): ", !badVerification);
 
-let oldVerification = await verifyIdentity(username, password);
+    assert(!badVerification);
 
-console.log("account verification (old password, should fail)? ", oldVerification);
+    sleep(sleepSeconds);
 
-assert(!oldVerification);
+    let account = await retrieveAccount(username, password);
 
-let newVerification = await verifyIdentity(username, newPassword);
+    print("fetched account not null (true => correct): ", account != null);
 
-console.log("account verification (new pass, should work)? ", newVerification);
+    assert(account != null);
 
-assert(newVerification);
+    assert(account.userKey == username);
 
-console.log("changing account username: ", await changeAccountUsername(username, newUsername, newPassword));
+    print("get account: ", account);
 
-const newUsernameAccountData = await retrieveAccountData(newUsername, password);
+    sleep(sleepSeconds);
 
-let sensitiveDataCheck = (accountData.sensitiveData['secretVal'] == newUsernameAccountData.sensitiveData['secretVal']);
+    const accountData = await retrieveAccountData(username, password);
 
-console.log("sensitiveData preserved during username change: ", sensitiveDataCheck);
+    print("account data is not null (true => correct): ", accountData != null);
 
-assert(sensitiveDataCheck);
+    assert(accountData != null);
 
-let metaDataCheck = (accountData.metaData['goodAcc'] && newUsernameAccountData.metaData['goodAcc']);
+    print("account data: ", accountData);
 
-console.log("metaData preserved during username change: ", metaDataCheck);
+    assert(accountData.metaData != null && accountData.metaData['goodAcc']);
 
-assert(metaDataCheck);
+    assert(accountData.sensitiveData != null && accountData.sensitiveData['hidden']);
 
-console.log("changing account meta data: ", await changeAccountMetaData(newUsername, newMetaData));
+    sleep(sleepSeconds);
 
-const newAccountMetaData = await retrieveAccountMetaData(newUsername);
+    const changeAccountPasswordCheck = await changeAccountPassword(username, password, newPassword);
 
-let accountMetaDataChangedCheck = (newUsernameAccountData.metaData['goodAcc'] && newAccountMetaData['goodAccChanged']);
+    print("change account password complete  (true => correct):  ", changeAccountPasswordCheck);
 
-console.log("metaData correctly updated: ", accountMetaDataChanged);
+    assert(changeAccountPasswordCheck);
 
-assert(accountMetaDataChangedCheck);
+    sleep(sleepSeconds);
 
-const unchangedSensitiveData = await retrieveAccountSensitiveData(newUsername, newPassword);
+    let oldVerification = await verifyIdentity(username, password);
 
-let sensitiveDataNotChangedCheck = (accountData.sensitiveData['secretVal'] == unchangedSensitiveData['secretVal']);
+    print("account verification using old password, (false => correct): ", oldVerification);
 
-console.log("sensitive data not changed after meta data update: ", sensitiveDataNotChangedCheck);
+    assert(!oldVerification);
 
-assert(sensitiveDataNotChangedCheck);
+    sleep(sleepSeconds);
 
-console.log("changing account meta data: ", await changeAccountSensitiveData(newUsername, newPassword, newSensitiveData));
+    let newVerification = await verifyIdentity(username, newPassword);
 
-const newAccountSensitiveData = await retrieveAccountSensitiveData(newUsername, newPassword);
+    print("account verification with changed password (true => correct): ", newVerification);
 
-let accountSensitiveDataChangedCheck = (newAccountSensitiveData['secretVal'] == newSensitiveData['secretVal']);
+    assert(newVerification);
 
-console.log("sensitiveData correctly updated: ", accountSensitiveDataChangedCheck);
+    const changeAccountUsernameCheck = await changeAccountUsername(username, newUsername, newPassword);
 
-assert(accountSensitiveDataChangedCheck);
+    print("changing account username passed: (true => correct)", changeAccountUsernameCheck);
 
-const unchangedMetaData = await retrieveAccountMetaData(newUsername);
+    assert(changeAccountUsernameCheck);
 
-let metaDataNotChangedCheck = (newAccountMetaData['goodAccChanged'] && unchangedMetaData['goodAccChanged']);
+    sleep(sleepSeconds);
 
-console.log("meta data not changed after sensitive data update: ", metaDataNotChangedCheck);
+    const newUsernameAccountData = await retrieveAccountData(newUsername, newPassword);
 
-console.log("changing account meta and sensitive data: ", await changeAccountData(newUsername, newPassword, newMetaData2, newSensitiveData2));
+    print("fetched data is not null? (true => correct): ", newUsernameAccountData != null);
 
-const newNewAccountData = await retrieveAccountData(newUsername);
+    assert(newUsernameAccountData != null &&
+           newUsernameAccountData.metaData != null &&
+           newUsernameAccountData.sensitiveData != null);
 
-let newNewAccountDataChange = (newNewAccountData.metaData['goodAccChanged2'] &&
-                               newNewAccountData.sensitiveData['secretVal'] == newSensitiveData2['secretVal']);
+    let sensitiveDataCheck = (accountData.sensitiveData['secretVal'] == newUsernameAccountData.sensitiveData['secretVal']);
 
-console.log("Changeing both meta and sensitive tests at the same time succeeded: ", newNewAccountDataChange);
+    print("sensitiveData preserved during username change (true => correct): ", sensitiveDataCheck);
 
-assert(newNewAccountDataChange);
+    assert(sensitiveDataCheck);
 
-console.log("testing finished");
+    let metaDataCheck = (accountData.metaData['goodAcc'] && newUsernameAccountData.metaData['goodAcc']);
+
+    print("metaData preserved during username change (true => correct): ", metaDataCheck);
+
+    assert(metaDataCheck);
+
+    sleep(sleepSeconds);
+
+    let changeAccMetaDataCallStatus = await changeAccountMetaData(newUsername, newMetaData);
+
+    print("changing account meta data (true => correct): ", changeAccMetaDataCallStatus);
+
+    assert(changeAccMetaDataCallStatus);
+
+    sleep(sleepSeconds);
+
+    const newAccountMetaData = await retrieveAccountMetaData(newUsername);
+
+    print("fetched meta data is not null? (true => correct): ", newAccountMetaData != null);
+
+    assert(newAccountMetaData != null);
+
+    let accountMetaDataChangedCheck = (newUsernameAccountData.metaData['goodAcc'] && newAccountMetaData['goodAccChanged']);
+
+    print("metaData correctly updated (true => correct): ", accountMetaDataChangedCheck);
+
+    assert(accountMetaDataChangedCheck);
+
+    sleep(sleepSeconds);
+
+    const unchangedSensitiveData = await retrieveAccountSensitiveData(newUsername, newPassword);
+
+    print("fetched sensitive data is not null? (true => correct): ", unchangedSensitiveData != null);
+
+    assert(unchangedSensitiveData != null);
+
+    let sensitiveDataNotChangedCheck = (accountData.sensitiveData['secretVal'] == unchangedSensitiveData['secretVal']);
+
+    print("sensitive data not changed after meta data update (true => correct): ", sensitiveDataNotChangedCheck);
+
+    assert(sensitiveDataNotChangedCheck);
+
+    sleep(sleepSeconds);
+
+    const changeAccountSensitiveDataCheck = await changeAccountSensitiveData(newUsername, newPassword, newSensitiveData)
+
+    print("changing account sensitive data: (true => correct): ", changeAccountSensitiveDataCheck);
+
+    assert(changeAccountSensitiveDataCheck);
+
+    sleep(sleepSeconds);
+
+    const newAccountSensitiveData = await retrieveAccountSensitiveData(newUsername, newPassword);
+
+    print("fetched sensitive data is not null? (true => correct): ", newAccountSensitiveData != null);
+
+    assert(newAccountSensitiveData != null);
+
+    let accountSensitiveDataChangedCheck = (newAccountSensitiveData['secretVal'] == newSensitiveData['secretVal']);
+
+    print("sensitiveData correctly updated: (true => correct): ", accountSensitiveDataChangedCheck);
+
+    assert(accountSensitiveDataChangedCheck);
+
+    sleep(sleepSeconds);
+
+    const unchangedMetaData = await retrieveAccountMetaData(newUsername);
+
+    print("fetched meta data is not null? (true => correct): ", unchangedMetaData != null);
+
+    assert(unchangedMetaData != null);
+
+    let metaDataNotChangedCheck = (newAccountMetaData['goodAccChanged'] && unchangedMetaData['goodAccChanged']);
+
+    print("meta data not changed after sensitive data update (true => correct): ", metaDataNotChangedCheck);
+
+    assert(metaDataNotChangedCheck);
+
+    sleep(sleepSeconds);
+
+    const changeAllDataCheck = await changeAccountData(newUsername, newPassword, newMetaData2, newSensitiveData2);
+
+    print("changing account meta and sensitive data: (true => correct)", changeAllDataCheck);
+
+    assert(changeAllDataCheck)
+
+    sleep(sleepSeconds);
+
+    const newNewAccountData = await retrieveAccountData(newUsername, newPassword);
+
+    print("fetched data is not null? (true => correct): ", newNewAccountData != null);
+
+    assert(newNewAccountData != null && newNewAccountData.metaData != null && newNewAccountData.sensitiveData != null);
+
+    let newNewAccountDataChange = (newNewAccountData.metaData['goodAccChanged2'] &&
+                                newNewAccountData.sensitiveData['secretVal'] == newSensitiveData2['secretVal']);
+
+    print("Changeing both meta and sensitive tests at the same time succeeded (true => correct): ", newNewAccountDataChange);
+
+    assert(newNewAccountDataChange);
+
+    print("testing finished!!!\n\n");
+}
+
+async function runAllTests(){
+    // No wait time (real use case).
+    await runTests(0);
+    // Short wait time between calls.
+    // Long enough to test unconfirmed transactions.
+    await runTests(9);
+    // Average confirmation time,
+    await runTests(60);
+    // Wait time longer than most confirmations.
+    await runTests(120);
+
+}
+
+runAllTests();

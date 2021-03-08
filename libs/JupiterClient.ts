@@ -1,24 +1,24 @@
 import axios, { AxiosResponse } from 'axios'
 import BigNumber from 'bignumber.js'
-import Encryption from '../libs/Encryption.js'
+import Encryption from '../libs/Encryption'
 
-export default function JupiterClient(opts: IJupiterClientOpts) {
+export default function JupiterClient(opts: IJupiterClientOpts, chainCache: any) {
   if (!(Boolean(opts.server) && Boolean(opts.address) &&
       Boolean(opts.passphrase)))
     throw new Error("You must properly initialise the Jupiter Client");
-  let chainCache: any = {};
-  const encryption = Encryption({ secret: opts.encryptSecret })
+
+  const encryption = Encryption({ secret: opts.encryptSecret });
   const CONF = {
     feeNQT: 150,
     deadline: 60,
     minimumTableBalance: 50000,
     minimumAppBalance: 100000,
     moneyDecimals: 8,
-  }
+  };
 
   // balances from the API come back as NQT, which is 1e-8 JUP
   const nqtToJup = (nqt: string): string =>
-    new BigNumber(nqt).div(CONF.moneyDecimals).toString()
+    new BigNumber(nqt).div(CONF.moneyDecimals).toString();
 
   return {
     recordKey: '__jupiter-connector',
@@ -34,7 +34,7 @@ export default function JupiterClient(opts: IJupiterClientOpts) {
     encrypt: encryption.encrypt.bind(encryption),
 
     async loadDatabase() {
-      const transactions = await this.getAllTransactions()
+      const transactions = await this.getAllTransactions();
     },
 
     async getBalance(address: string = opts.address): Promise<string> {
@@ -133,13 +133,12 @@ export default function JupiterClient(opts: IJupiterClientOpts) {
           compressMessageToEncrypt: true,
         },
       })
-      if (data.errorCode && data.errorCode !== 0){
-        console.log(data);
-        throw new Error(data);
-    }
+    
+      if (data.errorCode && data.errorCode !== 0) throw new Error(data);
 
-      // This won't be stored more than 2 minutes locally.
-      chainCache = messageToEncrypt;
+      chainCache.addRecordToChainCache(messageToEncrypt);
+
+      //console.log("new user: ", messageToEncrypt);
 
       return data
     },
@@ -161,19 +160,13 @@ export default function JupiterClient(opts: IJupiterClientOpts) {
           compressMessageToEncrypt: true,
         },
       })
+
       if (data.errorCode && data.errorCode !== 0) throw new Error(data)
-      
-      chainCache = null;
+
+      //console.log("storeRemoveUserAccount rec ", record);
+      chainCache.removeRecordFromChainCache(record.accountId);
 
       return data
-    },
-
-    queryUserAccountFromChainCache() {
-      return chainCache != null;
-    },
-
-    getUserAccountFromChainCache() {
-      return chainCache;
     },
 
     async storeRecord(record: any) {
@@ -194,6 +187,7 @@ export default function JupiterClient(opts: IJupiterClientOpts) {
           compressMessageToEncrypt: true,
         },
       })
+  
       if (data.errorCode && data.errorCode !== 0) throw new Error(data)
       return data
     },
@@ -215,6 +209,29 @@ export default function JupiterClient(opts: IJupiterClientOpts) {
       return decryptedMessage
     },
 
+    async getAllUnconfirmedTransactions(
+      withMessage: boolean = true,
+      type: number = 1
+    ): Promise<ITransaction[]> {
+      const {
+        data: {
+          /* requestProcessingTime, */
+          unconfirmedTransactions,
+        },
+      } = await this.request('post', '/nxt', {
+        params: {
+          requestType: 'getUnconfirmedTransactions',
+          account: opts.address,
+          withMessage,
+          type,
+        },
+      })
+      
+      return unconfirmedTransactions == null ?
+        [] :
+        unconfirmedTransactions.reverse();
+    },
+
     async getAllTransactions(
       withMessage: boolean = true,
       type: number = 1
@@ -228,11 +245,15 @@ export default function JupiterClient(opts: IJupiterClientOpts) {
         params: {
           requestType: 'getBlockchainTransactions',
           account: opts.address,
+          firstIndex: opts.firstIndex,
+          lastIndex: opts.lastIndex,
           withMessage,
           type,
         },
       })
-      return transactions
+      return transactions == null ?
+        [] :
+        transactions.reverse();
     },
 
     async request(
@@ -263,6 +284,8 @@ interface IJupiterClientOpts {
   address: string
   passphrase: string
   encryptSecret: string
+  firstIndex: number
+  lastIndex: number
   publicKey?: string
   feeNQT?: number
   deadline?: number
