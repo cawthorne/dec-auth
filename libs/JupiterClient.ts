@@ -164,7 +164,7 @@ export default function JupiterClient(opts: IJupiterClientOpts, chainCache: any)
       if (data.errorCode && data.errorCode !== 0) throw new Error(data)
 
       //console.log("storeRemoveUserAccount rec ", record);
-      chainCache.removeRecordFromChainCache(record.accountId);
+      chainCache.removeRecordFromChainCache(record.accountId, record.userKey);
 
       return data
     },

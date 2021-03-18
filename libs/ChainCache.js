@@ -1,6 +1,6 @@
 // X seconds until cache expires.
 // (should be as short as possible really).
-const cacheLifetime = 5*1000; // Timer is in milli-seconds.
+const cacheLifetime = 10*1000; // Timer is in milli-seconds.
 let chainCache = {};
 let userKeyDict = {};
 let timersDict = {};
@@ -46,8 +46,7 @@ export default class ChainCache {
         return accountId != null ? deepCopy(chainCache[accountId]) : null;
     }
 
-    removeRecordFromChainCache = async function(accountId){
-        //console.log("CC removing account ID ", accountId);
+    removeRecordFromChainCache = async function(accountId, userKey){
 
         clearTimeout((accountId in timersDict) ?
                         timersDict[accountId] :
@@ -60,15 +59,16 @@ export default class ChainCache {
             delete chainCache[accountId]},
             cacheLifetime);
 
-        chainCache[accountId] = {accountId: accountId, isDeleted: true};
+        delete chainCache[userKeyDict[userKey]];
+        delete chainCache[accountId];
+
+        userKeyDict[userKey] = accountId;
+        chainCache[accountId] = {accountId: accountId, userKey: userKey,
+                                 isDeleted: true};
         timersDict[accountId] = timeOut;
     }
 
     removeUserKeyRecordFromChainCache = async function(userKey){
         removeRecordFromChainCache(userKeyDict[userKey]);
-        // Potenitally not necessary to delete this, but if we aren't targetting a
-        // specific accountId we should avoid providing a userKey => removedAccount
-        // path altogether
-        delete userKeyDict[userKey];
     }
 }

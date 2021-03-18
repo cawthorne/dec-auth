@@ -145,7 +145,7 @@ export const retrieveAccount = async function(userKey, passKey,
 /// Retrieves all user accounts from the Jupiter blockchain.
 /// @returns All user accounts. No sensitve data is decrypted.
 export const retrieveAllAccounts = async function() {
-    return await getAllAccounts();
+    return await getAllAccounts(true);
 }
 
 /// @function retrieveAccountData
@@ -159,7 +159,7 @@ export const retrieveAllAccounts = async function() {
 /// the sensitiveData field will be nullified. 
 /// If the password and/or username were invalid, null will be returned.
 export const retrieveAccountData = async function(userKey, passKey) {
-    let account = await retrieveAccount(userKey, passKey);
+    const account = await retrieveAccount(userKey, passKey);
     if (account != null)
         return {metaData: account.metaData, sensitiveData: account.sensitiveData};
     return null;
@@ -173,7 +173,7 @@ export const retrieveAccountData = async function(userKey, passKey) {
 /// @returns the requested account's meta data as an object on success.
 /// otherwise null;
 export const retrieveAccountMetaData = async function(userKey) {
-    let account = await retrieveAccount(userKey, null);
+    const account = await retrieveAccount(userKey, null);
     if (account != null)
         return account.metaData;
     return null;
@@ -189,7 +189,7 @@ export const retrieveAccountMetaData = async function(userKey) {
 /// the sensitiveData field will be nullified. 
 /// If the password and/or username were invalid, null will be returned.
 export const retrieveAccountSensitiveData = async function(userKey, passKey) {
-    let account = await retrieveAccount(userKey, passKey);
+    const account = await retrieveAccount(userKey, passKey);
     if (account != null)
         return account.sensitiveData;
     return null;
@@ -212,10 +212,12 @@ export const changeAccountPassword = async function(userKey, passKey, newPassKey
 
     if (accData == null)
         return false;
-    await removeAccount(userKey, passKey);
 
-    await createAccount(userKey, newPassKey, accData.metaData, accData.sensitiveData);
-    return true;
+    const accRes = await removeAccount(userKey, passKey);
+    if (accRes == false)
+        return false;
+
+    return await createAccount(userKey, newPassKey, accData.metaData, accData.sensitiveData);
 }
 
 /// @function changeAccountUsername
@@ -234,9 +236,12 @@ export const changeAccountUsername = async function(userKey, newUserKey, passKey
     const accData = await retrieveAccountData(userKey, passKey);
     if (accData == null)
         return false;
-    await removeAccount(userKey, passKey);
-    await createAccount(newUserKey, passKey, accData.metaData, accData.sensitiveData);
-    return true;
+
+    const accRes = await removeAccount(userKey, passKey);
+    if (accRes == false)
+        return false;
+
+    return await createAccount(newUserKey, passKey, accData.metaData, accData.sensitiveData);
 }
 
 /// @function changeAccountData
@@ -251,7 +256,11 @@ export const changeAccountUsername = async function(userKey, newUserKey, passKey
 export const changeAccountData = async function(userKey, passKey, newMetaData, newSensitiveData) {
     if (await verifyIdentity(userKey, passKey) === false)
         return false;
-    await removeAccount(userKey, passKey);
+
+    const accRes = await removeAccount(userKey, passKey);
+    if (accRes == false)
+        return false;
+
     return await createAccount(userKey, passKey, newMetaData, newSensitiveData);
 }
 
@@ -267,8 +276,12 @@ export const changeAccountMetaData = async function(userKey, newMetaData) {
     let account = await retrieveAccount(userKey, null, true);
     if (account == null)
         return false;
+
     // Force account removal, as preserving sensitive data.
-    await removeAccount(userKey, null, true);
+    const accRes = await removeAccount(userKey, null, true);
+    if (accRes == false)
+        return false;
+
     return await createAccount(userKey, account.encryptedPassKey, newMetaData,
                          account.sensitiveData, true);
 }
@@ -289,7 +302,10 @@ export const changeAccountSensitiveData = async function(userKey, passKey, newSe
     const accData = await retrieveAccountData(userKey, null);
     if (accData == null)
         return false;
-    await removeAccount(userKey, passKey);
+
+    const accRes = await removeAccount(userKey, passKey);
+    if (accRes == false)
+        return false;
 
     return await createAccount(userKey, passKey, accData.metaData, newSensitiveData);
 }
@@ -307,11 +323,14 @@ export const removeAccount = async function(userKey, passKey, force = false) {
         return false;
 
     // Since we just want the account id, no need for user password.
-    let account = await retrieveAccount(userKey, null);
-    let accountId = account.accountId
-    let jupClient = await getJupiterClient(null);
+    const account = await retrieveAccount(userKey, null);
+    const accountId = account.accountId
+    const accUserKey = account.userKey
+    const jupClient = await getJupiterClient(null);
 
-    let res =  await jupClient.storeRemoveUserAccount({ accountId: accountId, isDeleted: true });
+    const res =  await jupClient.storeRemoveUserAccount({ accountId: accountId,
+                                                          userKey: accUserKey,
+                                                          isDeleted: true });
     return res['broadcasted'] == true;
 }
 
@@ -340,24 +359,18 @@ const isValidEntry = function(str) {
 /// with the sensitive data field nullified.
 /// If the password and/or username were invalid, null will be returned.
 const getAccount = async function(userKey, passKey, keepEncryptedSensitiveData = false) {
-    const cachedAccount = await jupChainCache.fetchUserKeyRecordFromChainCache(userKey);
-    let account = null;
+    let account = await getAccountFromBlockchain(userKey, true);
 
-    if (cachedAccount == null) {
-        const accounts = await getAllAccounts();
-
-        account = await accounts.find((a) => a.userKey === userKey);
-        if (account == null)
-            return null;
-    } else if (cachedAccount['isDeleted']){
-        // chainCache reports this account has been deleted.
+    if (account == null)
         return null;
-    } else
-        account = cachedAccount;
+
+    // Deleted account shouldn't get this far anyway.
+    if (account['isDeleted']){
+        // This account has been deleted.
+        return null;
+    }
 
     if (passKey != null) {
-        //console.log("account ", account);
-        //console.log(userKey.concat(passKey) + " : " + account.encryptedPassKey);
         if (bcrypt.compareSync(userKey.concat(passKey), account.encryptedPassKey)) {
             const jupClient = await getJupiterClient(userKey, passKey);
             // Decrypting the sensitive data.
@@ -378,13 +391,57 @@ const getAccount = async function(userKey, passKey, keepEncryptedSensitiveData =
     return await account;
 }
 
+
+/// @function getAccountFromBlockchain
+/// Fetches all the accounts from the Jupiter Blockchain for the master jupAccountId.
+/// @returns all of the users non-deleted accounts.
+const getAccountFromBlockchain = async function(userKey, useChainCache) {
+    const client = await getJupiterClient(null);
+
+    const chainCacheInstance = useChainCache == true ?
+                                await jupChainCache.fetchAllRecordsFromChainCache() :
+                                {};
+
+    let chainCacheAccount = await getAccountFromDict(userKey, chainCacheInstance);
+
+    if (chainCacheAccount != null){
+        if (chainCacheAccount.isDeleted)
+            return null
+        return chainCacheAccount;
+    }
+    // Therefore not in Chain-Cache.
+
+    const unconfTxns = await client.getAllUnconfirmedTransactions();
+
+    if (unconfTxns.length == 0) {
+        const txns = await client.getAllTransactions();
+        const confAccounts = await parseTransactions(txns);
+        // Therefore not in Chain-Cache or unconfirmed txns.
+        return await getAccountFromDict(userKey, confAccounts);
+    } else {
+        // Could be in unconfirmed Transactions.
+        let unconfAccounts = await parseTransactions(unconfTxns);
+        let unconfAccount = await getAccountFromDict(userKey, unconfAccounts);
+        if (unconfAccount != null)
+            return unconfAccount;
+        
+        const txns = await client.getAllTransactions();
+        const confAccounts = await parseTransactions(txns);
+
+        // Therefore not in Chain-Cache or unconfirmed txns.
+        return await getAccountFromDict(userKey, confAccounts);
+    }
+}
+
 /// @function getAllAccounts
 /// Fetches all the accounts from the Jupiter Blockchain for the master jupAccountId.
 /// @returns all of the users non-deleted accounts.
-const getAllAccounts = async function() {
+const getAllAccounts = async function(useChainCache) {
     const client = await getJupiterClient(null);
 
-    const chainCacheInstance = await jupChainCache.fetchAllRecordsFromChainCache();
+    const chainCacheInstance = useChainCache == true ?
+                                await jupChainCache.fetchAllRecordsFromChainCache() :
+                                {};
 
     const unconfTxns = await client.getAllUnconfirmedTransactions();
     const txns = await client.getAllTransactions();
@@ -399,12 +456,22 @@ const getAllAccounts = async function() {
                                                     await parseTransactions(txns)),
                             chainCacheInstance);
 
-    // Testing
-    //console.log("unconfTxns len ", unconfTxns.length);
-    //console.log("txns len ", txns.length);
-    //console.log("allConfAccounts len ", Object.keys(allAccounts).length);
-
     return Object.values(allAccounts);
+}
+
+const getAccountFromDict = async function(userkey, dict) {
+    let accs =  Object.values(dict).filter((acc) => !acc.isDeleted &&
+                                                     acc.userKey == userkey);
+
+    if (accs.length == 0) {
+        accs = Object.values(dict).filter((acc) => acc.userKey == userkey);
+        if (accs.length == 0)
+            return null;
+        else
+            return accs[0];
+    }
+
+    return accs[0];
 }
 
 
@@ -426,27 +493,15 @@ const parseTransactions = async function(txns, initalRecords) {
                 )
                 let account = JSON.parse(decryptedMessage);
 
-                // Testing
-                //if (account.userKey == testAccount)
-                //    console.log("found " + testAccount + ": ", account);
-
                 if (!account[client.recordKey]) return await result;
 
                 delete account[client.recordKey];
 
                 if (account.isDeleted != null){
-                    // Testing
-                    //if (account.userKey == testAccount)
-                    //    console.log("deleting " + testAccount);
                     delete result[account.accountId];
                     return await result;
                 }
                 
-                // Testing
-                //if (account.userKey == testAccount){
-                //    console.log("Reduce adding to result: ", testAccount);
-                    //console.log("Transaction: ", txn);
-                //}
                 result[account.accountId] = await account;
 
                 return await result;
@@ -477,10 +532,11 @@ const combineAccountDicts = async function(olderState, newerState) {
 /// master Jupiter Account.
 /// @returns void
 export const deleteAllAccounts = async function() {
-    const accounts = await getAllAccounts();
+    const accounts = await getAllAccounts(true);
     for (const account of accounts) {
         let jupClient = await getJupiterClient(null);
         await jupClient.storeRemoveUserAccount({ accountId: account.accountId,
+                                                 userKey: account.userKey,
                                                  isDeleted: true });
     }
 }

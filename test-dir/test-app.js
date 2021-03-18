@@ -40,7 +40,7 @@ async function runTests(sleepSeconds) {
             " Pauses disabled" :
            ("sleep time between calls: " + sleepSeconds + "(s)")));
 
-    print("Please make sure you have added a funded, JUP account wiht public key assigned.")
+    print("Please make sure you have added a funded, JUP account with public key assigned.")
     setJupiterAccountDetails(null, jupAccountId, jupPassphrase);
 
     setFirstLastBlockIndex(0, 100);
@@ -175,7 +175,11 @@ async function runTests(sleepSeconds) {
 
     assert(metaDataCheck);
 
-    sleep(sleepSeconds);
+    if (sleepSeconds == 0) {
+        print("!!! sleeping 12 seconds to clear chain cache !!!");
+        sleep(12);
+    } else
+        sleep(sleepSeconds);
 
     let changeAccMetaDataCallStatus = await changeAccountMetaData(newUsername, newMetaData);
 
@@ -278,7 +282,7 @@ async function runAllTests(){
     await runTests(0);
     // Short wait time between calls.
     // Long enough to test unconfirmed transactions.
-    await runTests(9);
+    await runTests(12);
     // Average confirmation time,
     await runTests(60);
     // Wait time longer than most confirmations.
